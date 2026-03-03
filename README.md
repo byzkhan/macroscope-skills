@@ -1,6 +1,6 @@
 # Macroscope Skills
 
-Skills for [Macroscope](https://macroscope.com) code review that can be used with any coding agent
+CLaude Code Skills for [Macroscope](https://macroscope.com) code review.
 
 ## Available Skills
 
