@@ -1,4 +1,4 @@
-# Macroscope Skills for Claude Code
+# Macroscope Skills
 
 Claude Code skills for [Macroscope](https://macroscope.com) code review.
 
