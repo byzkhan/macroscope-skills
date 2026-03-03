@@ -15,76 +15,66 @@ allowed-tools: Bash(gh:*) Bash(git:*)
 
 # Fix PR
 
-Iteratively fix a PR until Macroscope gives it a clean review: check passes, zero unresolved comments.
+Resolve every Macroscope finding on a pull request automatically. The skill runs in a fix-verify loop — read the findings, patch the code, push, and confirm the check goes green — until nothing remains.
 
 ## Inputs
 
 - **PR number** (optional): If not provided, detect the PR for the current branch.
 
-## Instructions
+## How it works
 
-### 1. Identify the PR
+### 1. Discover the PR
 
 ```bash
 gh pr view --json number,headRefName -q '{number: .number, branch: .headRefName}'
 ```
 
-Extract owner/repo:
+Grab owner/repo for GraphQL calls:
 ```bash
 gh repo view --json owner,name -q '{owner: .owner.login, repo: .name}'
 ```
 
 Switch to the PR branch if not already on it.
 
-### 2. Loop
+### 2. Fix-verify loop
 
-Repeat the following cycle. **Max 5 iterations** to avoid runaway loops.
+Run up to **5 rounds**. Each round follows this sequence:
 
-#### A. Wait for Macroscope check
+#### 2a. Push and wait for Macroscope
 
-Push the latest changes (if any) and wait for Macroscope's check to complete:
+Push any pending changes, then poll until the Macroscope check finishes:
 
 ```bash
 git push
-```
-
-Poll until the Macroscope check finishes:
-```bash
 gh pr view --json statusCheckRollup --jq '.statusCheckRollup[] | select(.name | test("Macroscope")) | "\(.status) \(.conclusion)"'
 ```
 
-Wait if `IN_PROGRESS` or `QUEUED`. Proceed once `COMPLETED`.
+Hold until status is `COMPLETED`.
 
-#### B. Fetch unresolved review threads
+#### 2b. Collect open threads
 
-Use GraphQL to get unresolved threads efficiently (see [GraphQL reference](references/graphql-queries.md)):
+Pull unresolved review threads via GraphQL (see [reference queries](references/graphql-queries.md)). Only look at threads authored by `macroscopeapp[bot]`.
 
-```bash
-gh api graphql -f query='...' --jq '.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved == false)'
-```
+#### 2c. Decide whether to stop
 
-Filter to comments from `macroscopeapp[bot]`.
+Exit the loop when:
+- The Macroscope check is green (SUCCESS / NEUTRAL / SKIPPING) **and** there are no unresolved threads, **or**
+- 5 rounds have been exhausted.
 
-#### C. Check exit conditions
+#### 2d. Patch the code
 
-Stop the loop if **any** of these are true:
-- Macroscope check passed (SUCCESS/NEUTRAL/SKIPPING) AND **zero unresolved comments**
-- Max iterations reached (report current state)
+Walk through each unresolved finding:
 
-#### D. Fix actionable comments
+1. Open the file and read the surrounding context.
+2. If the comment refers to a line that has already been rewritten (stale diff position), confirm the underlying issue is gone and queue the thread for resolution.
+3. Otherwise, apply the fix. Prefer targeted edits over full-file rewrites.
+4. For false positives that genuinely cannot be addressed, still resolve the thread so it doesn't block the next round.
 
-For each unresolved Macroscope comment:
+Keep related changes in the same commit — avoid micro-commits for individual line fixes.
 
-1. Read the file and understand the comment in context.
-2. Check if the comment points to a stale diff line (code already changed). If the fix is already applied, mark it for resolution in Step E.
-3. If actionable, make the fix.
-4. If it's a false positive, note it but still resolve the thread.
+#### 2e. Clean up resolved threads
 
-Group related fixes together — don't make one commit per line change.
-
-#### E. Resolve stale threads
-
-For threads where the code fix is already applied but the thread wasn't auto-resolved, resolve via GraphQL:
+Any thread whose underlying issue is already fixed in the working tree but still shows as open on GitHub gets resolved with a GraphQL mutation:
 
 ```bash
 gh api graphql -f query='
@@ -93,59 +83,41 @@ mutation {
 }'
 ```
 
-Batch multiple resolutions into a single mutation when possible.
+Batch them into a single mutation when there are several.
 
-#### F. Commit and push
+#### 2f. Commit, push, next round
 
 ```bash
-git add <specific-files>
-git commit -m "Fix Macroscope review findings (iteration N)"
+git add <changed-files>
+git commit -m "Address Macroscope findings (round N)"
 git push
 ```
 
-Then go back to step **A**.
+Return to step 2a.
 
-### 3. Report
+### 3. Summary
 
-After exiting the loop, summarize:
-
-| Field | Value |
-|-------|-------|
-| Iterations | N |
-| Check status | PASS/FAIL |
-| Comments resolved | N |
-| Remaining comments | N (if any) |
-
-If the loop exited due to max iterations, list remaining unresolved comments and suggest next steps.
-
-## Output format
+Print a short status block when finished:
 
 ```
-Fix-PR complete.
-  Iterations:    2
-  Check:         PASS
-  Resolved:      7 comments
-  Remaining:     0
+fix-pr done  ·  2 rounds  ·  7 resolved  ·  0 remaining  ·  check: pass
 ```
 
-If not fully resolved:
+If the loop hit the cap, list whatever is still open:
 
 ```
-Fix-PR stopped after 5 iterations.
-  Check:         PASS
-  Resolved:      12 comments
-  Remaining:     2
+fix-pr stopped after 5 rounds  ·  12 resolved  ·  2 remaining  ·  check: pass
 
-Remaining issues:
-  - src/lib.rs:45 — "Consider handling the error case"
-  - src/main.js:112 — "Potential XSS via innerHTML"
+Open findings:
+  src/lib.rs:45 — "Consider handling the error case"
+  src/main.js:112 — "Potential XSS via innerHTML"
 ```
 
-## Rules
+## Guidelines
 
-- Fix every finding — never skip one
-- Always read a file before editing it
-- Batch fixes into logical commits, not one per finding
-- Never force-push or rewrite history
-- Only resolve a thread via GraphQL if the code fix is genuinely already applied
-- If a fix fails after 3 attempts, flag it to the user
+- Address every finding — don't skip any.
+- Read a file before editing it.
+- Group fixes into logical commits.
+- Never force-push or rewrite history.
+- Only resolve a thread via GraphQL when the code genuinely already addresses it.
+- After 3 failed attempts on the same finding, surface it to the user instead of looping further.
