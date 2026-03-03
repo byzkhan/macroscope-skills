@@ -1,16 +1,8 @@
 ---
 name: fix-pr
-description: >
-  Iteratively fixes a PR until Macroscope's GitHub check passes with zero
-  unresolved review comments. Fetches findings, fixes code, pushes, and
-  repeats. Use when the user wants to resolve all Macroscope review feedback
-  on a PR.
-license: MIT
-compatibility: Requires git, gh (GitHub CLI) authenticated, and Macroscope installed on the repo.
-metadata:
-  author: byzkhan
-  version: "1.0"
-allowed-tools: Bash(gh:*) Bash(git:*)
+description: Iteratively fixes a PR until Macroscope's GitHub check passes with zero unresolved review comments.
+user-invocable: true
+argument-hint: ""
 ---
 
 # Fix PR
